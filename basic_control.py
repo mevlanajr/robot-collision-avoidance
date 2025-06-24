@@ -17,9 +17,9 @@ joint2 = sim.getObject('/joint2')
 assert joint1 >= 0 and joint2 >= 0, 'Joint handles not found'
 
 # Control parameters
-gain = 1.0
+kp = 5.0
 dt = 0.05
-steps = int(10.0 / dt)
+steps = int(20 / dt)
 
 # Data storage
 times = []
@@ -38,8 +38,8 @@ for i in range(steps):
     q1_actual.append(q1)
     q2_desired.append(q2_ref)
     q2_actual.append(q2)
-    sim.setJointTargetVelocity(joint1, gain * (q1_ref - q1))
-    sim.setJointTargetVelocity(joint2, gain * (q2_ref - q2))
+    sim.setJointTargetVelocity(joint1, kp * (q1_ref - q1))
+    sim.setJointTargetVelocity(joint2, kp * (q2_ref - q2))
     sim.step()
 
 # Stop simulation
