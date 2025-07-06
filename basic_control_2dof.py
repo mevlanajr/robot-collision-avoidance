@@ -1,63 +1,90 @@
 import math
 import matplotlib.pyplot as plt
+import numpy as np
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
-# Connect and start simulation
-task_client = RemoteAPIClient()
-sim = task_client.require('sim')
-sim.loadScene(
-    '/home/mevlanajr/Projects/robot-collision-avoidance/models/simple_RR_2DOF.ttt'
-)
+# 1) Connect & start
+client = RemoteAPIClient()
+sim    = client.require('sim')
+simIK  = client.require('simIK')
+scene = '/home/mevlanajr/Projects/robot-collision-avoidance/models/simple_RR_planar.ttt'
+sim.loadScene(scene)
 sim.setStepping(True)
 sim.startSimulation()
 
-# Retrieve joint handles
+# 2) Handles
 joint1 = sim.getObject('/joint1')
 joint2 = sim.getObject('/joint2')
-assert joint1 >= 0 and joint2 >= 0, 'Joint handles not found'
+tip     = sim.getObject('/tip')
+base    = sim.getObject('/base')
+target  = sim.getObject('/target')
 
-# Control parameters
-kp = 5.0
-dt = 0.05
-steps = int(20 / dt)
+# 3) Build IK group for Jacobian
+ikEnv   = simIK.createEnvironment()
+ikGroup = simIK.createGroup(ikEnv)
+simIK.addElementFromScene(ikEnv, ikGroup, base, tip, target, simIK.constraint_x | simIK.constraint_y)
+simIK.setGroupCalculation(ikEnv, ikGroup, simIK.method_pseudo_inverse, 0, 0)
 
-# Data storage
-times = []
-q1_actual, q1_desired = [], []
-q2_actual, q2_desired = [], []
+# 4) Desired set-point (fixed, since base at origin)
+desired_xy = np.array([1, 0.5])  # [x, y] in world coords
 
-# P‐controller velocity loop
+# — MOVE THE TARGET TO desired_xy RIGHT AWAY, KEEPING ITS Z —
+pos = sim.getObjectPosition(target, -1)
+sim.setObjectPosition(target, -1,
+                      [float(desired_xy[0]),
+                       float(desired_xy[1]),
+                       pos[2]])
+
+# 5) Controller params
+dt       = 0.05  # control timestep [s]
+duration = 10   # total time [s]
+steps    = int(duration / dt)
+gamma    = 10   # feedback gain
+
+# 6) Data logs
+times      = []
+error_norm = []
+
+# 7) Set-point control loop
 for i in range(steps):
     t = i * dt
-    q1_ref = 0.5 * math.sin(0.5 * t)
-    q2_ref = 0.3 * math.sin(0.7 * t)
-    q1 = sim.getJointPosition(joint1)
-    q2 = sim.getJointPosition(joint2)
-    times.append(t)
-    q1_desired.append(q1_ref)
-    q1_actual.append(q1)
-    q2_desired.append(q2_ref)
-    q2_actual.append(q2)
-    sim.setJointTargetVelocity(joint1, kp * (q1_ref - q1))
-    sim.setJointTargetVelocity(joint2, kp * (q2_ref - q2))
+    # 7a) current end-effector pos
+    M  = np.array(sim.getObjectMatrix(tip, sim.handle_world)).reshape(3, 4)
+    ee = M[:2, 3]
+
+    # 7b) Compute Jacobian J_xy
+    jac_flat, _ = simIK.computeGroupJacobian(ikEnv, ikGroup)
+    Jxy = np.array(jac_flat).reshape((2, 2))  # only X-Y rows
+
+    # 7c) control law:
+    error = desired_xy - ee 
+    v_cmd = gamma * error
+    lamda = 1e-5       # damping factor for numerical stability
+    JTJ = Jxy.T @ Jxy + lamda * np.eye(2)  
+    dq  = np.linalg.solve(JTJ, Jxy.T @ v_cmd)
+    
+    # Integrate to get desired positions for the next step
+    current_q1 = sim.getJointPosition(joint1)
+    current_q2 = sim.getJointPosition(joint2)
+    q_desired = np.array([current_q1, current_q2]) + dq * dt
+
+    sim.setJointPosition(joint1, q_desired[0])
+    sim.setJointPosition(joint2, q_desired[1])
+
     sim.step()
 
-# Stop simulation
+    # 7e) log data
+    times.append(t)
+    error_norm.append(np.linalg.norm(error))
+
+# 8) stop sim
 sim.stopSimulation()
 
-# Plot tracking results
+# 9) plot error convergence
 plt.figure()
-plt.plot(times, q1_desired, label='Joint 1 desired')
-plt.plot(times, q1_actual, label='Joint 1 actual')
+plt.plot(times, error_norm, 'm-')
 plt.xlabel('Time [s]')
-plt.ylabel('Angle [rad]')
-plt.legend()
-
-plt.figure()
-plt.plot(times, q2_desired, label='Joint 2 desired')
-plt.plot(times, q2_actual, label='Joint 2 actual')
-plt.xlabel('Time [s]')
-plt.ylabel('Angle [rad]')
-plt.legend()
-
+plt.ylabel('||error|| [m]')
+plt.title('Set-Point Error Convergence')
+plt.grid(True)
 plt.show()
