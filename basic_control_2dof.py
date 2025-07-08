@@ -46,7 +46,7 @@ phi0   = math.atan2(py - center_xy[1], px - center_xy[0])
 # 5) Controller params
 duration = 100   # total time [s]
 steps    = int(duration / dt)
-gamma    = 1.5   # control gain
+gamma    = 1.8   # control gain
 
 # 6) Data logs
 times      = []
