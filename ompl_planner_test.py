@@ -32,7 +32,7 @@ obstacle_handles = [sim.getObject(n) for n in obstacle_names]
 # ====================================================================
 print("--- STAGE 1: PATH PLANNING ---")
 task = simOMPL.createTask('task')
-simOMPL.setStateSpaceForJoints(task, joint_handles, [1,1,1,1,1,1])
+simOMPL.setStateSpaceForJoints(task, joint_handles, [1,1,1,0,0,0])
 links_to_check = joint_handles + [tip]
 
 robot_coll = sim.createCollection()
@@ -60,7 +60,10 @@ simIK.syncFromSim(ikEnv, [ikGroup])
 ik_jhs = [simToIkMap.get(j) for j in joint_handles]
 if any(h is None for h in ik_jhs):
     raise RuntimeError("IK handle mapping failed. Check scene hierarchy.")
-configs = simIK.findConfigs(ikEnv, ikGroup, ik_jhs, {'maxTime': 5})
+configs = simIK.findConfigs(ikEnv, ikGroup, ik_jhs, {
+    'maxTime': 15.0,  # 15 seconds for IK search
+    'maxDist': 1e-1    # 1 cm accuracy
+})
 simIK.eraseEnvironment(ikEnv)
 sim.stopSimulation()
 
